@@ -143,7 +143,9 @@ def load_flow_model_quintized(name: str, device: str = "cuda", hf_download: bool
         not os.path.exists(ckpt_path)
         and hf_download
     ):
+        print("Downloading model")
         ckpt_path = hf_hub_download("XLabs-AI/flux-dev-fp8", "flux-dev-fp8.safetensors")
+        print("Model downloaded to", ckpt_path)
     json_path = hf_hub_download("XLabs-AI/flux-dev-fp8", 'flux_dev_quantization_map.json')
 
     model = Flux(configs[name].params).to(torch.bfloat16)
