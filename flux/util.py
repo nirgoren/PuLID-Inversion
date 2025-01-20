@@ -149,17 +149,65 @@ def load_flow_model_quintized(name: str, device: str = "cuda", hf_download: bool
     json_path = hf_hub_download("XLabs-AI/flux-dev-fp8", 'flux_dev_quantization_map.json')
 
     model = Flux(configs[name].params).to(torch.bfloat16)
+def load_flow_model_quintized(
+    name: str,
+    device: str = "cuda",
+    hf_download: bool = True,
+    cache_path: str = "flux_dev_fp8_quantized_model.pth",
+):
+    """
+    Loads (or downloads) a FLUX-fp8 checkpoint, performs quantization once,
+    and caches the quantized model to disk. Future calls load from cache.
+    
+    :param name: model name key in configs (e.g. "flux-dev-fp8")
+    :param device: Torch device string ("cuda" or "cpu")
+    :param hf_download: Whether to download from HF if local ckpt is missing
+    :param cache_path: Filepath for cached quantized model
+    :return: A quantized FLUX model on the specified device.
+    """
 
-    print("Loading checkpoint")
-    # load_sft doesn't support torch.device
-    sd = load_sft(ckpt_path, device='cpu')
-    with open(json_path) as f:
+    # 1) Check if we already have a cached, quantized model
+    if os.path.exists(cache_path):
+        print(f"Loading cached quantized model from '{cache_path}'...")
+        model = torch.load(cache_path, map_location=device)
+        return model.to(device)
+
+    # 2) If no cache, build and quantize for the first time.
+    print("No cached model found. Initializing + quantizing from scratch.")
+
+    # (A) Download or specify checkpoint paths
+    ckpt_path = "models/flux-dev-fp8.safetensors"
+    if not os.path.exists(ckpt_path) and hf_download:
+        print("Downloading model checkpoint from HF...")
+        ckpt_path = hf_hub_download("XLabs-AI/flux-dev-fp8", "flux-dev-fp8.safetensors")
+        print("Model downloaded to:", ckpt_path)
+
+    json_path = hf_hub_download("XLabs-AI/flux-dev-fp8", "flux_dev_quantization_map.json")
+
+    # (B) Build the unquantized model
+    print("Initializing model in bfloat16...")
+    model = Flux(configs[name].params).to(torch.bfloat16)
+
+    # (C) Load the unquantized weights
+    print("Loading unquantized checkpoint to CPU...")
+    sd = load_sft(ckpt_path, device="cpu")  # CPU load
+
+    # (D) Load quantization map
+    with open(json_path, "r") as f:
         quantization_map = json.load(f)
-    print("Start a quantization process...")
+
+    # (E) Quantize
+    print("Starting quantization process...")
     from optimum.quanto import requantize
     requantize(model, sd, quantization_map, device=device)
-    print("Model is quantized!")
-    return model
+    print("Quantization complete.")
+
+    # (F) Cache the fully quantized model to disk
+    print(f"Saving the quantized model to '{cache_path}'...")
+    torch.save(model, cache_path)
+    print("Model saved. Future runs will load from cache.")
+
+    return model.to(device)
 
 
 def load_t5(device: str = "cuda", max_length: int = 512) -> HFEmbedder:
