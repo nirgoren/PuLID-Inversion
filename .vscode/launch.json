@@ -1,0 +1,49 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "debug app",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "app_flux.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--offload",
+                "--fp8"
+            ]
+        },
+        {
+            "name": "debug inversion",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "flux_run_pulid.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--run_yaml",
+                "configs/run_configs/rf.yaml",
+                "--data_yaml",
+                "configs/data_configs/people/7.yaml",
+                "--output_path",
+                "results/debug/no_pulid"
+            ]
+        },
+        {
+            "name": "debug inversion pulid",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "flux_run_pulid.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--run_yaml",
+                "configs/run_configs/rf_pulid.yaml",
+                "--data_yaml",
+                "configs/data_configs/people/7.yaml",
+                "--output_path",
+                "results/debug/pulid"
+            ]
+        }
+    ]
+}

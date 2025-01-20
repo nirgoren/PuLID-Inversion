@@ -6,6 +6,8 @@ wandb/*
 tmp/*
 weights/*
 inputs/*
+models/*
+flux_dev_fp8_quantized_model.pth
 
 *.DS_Store
 
