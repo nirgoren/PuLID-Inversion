@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 import time
 import numpy as np
 import yaml
@@ -350,49 +351,66 @@ class FluxGenerator:
 
 def main():
     parser = argparse.ArgumentParser("Script to run PuLID+FLUX generation from YAML configs.")
-    parser.add_argument("--env_yaml", required=True, help="Path to YAML with environment/settings.")
-    parser.add_argument("--job_yaml", required=True, help="Path to YAML with prompt & ID image info.")
+    parser.add_argument("--run_yaml", required=True, help="Path to YAML with environment/settings.")
+    parser.add_argument("--data_yaml", required=True, help="Path to YAML with prompt & ID image info.")
+    parser.add_argument("--output_path", default="results", help="Path to save the generated image.")
     args = parser.parse_args()
 
     # 1) Load environment parameters
-    with open(args.env_yaml, "r") as f:
-        env_cfg = yaml.safe_load(f)
+    with open(args.run_yaml, "r") as f:
+        run_cfg = yaml.safe_load(f)
 
     # 2) Load job parameters
-    with open(args.job_yaml, "r") as f:
-        job_cfg = yaml.safe_load(f)
+    with open(args.data_yaml, "r") as f:
+        data_cfg = yaml.safe_load(f)
 
     # Unpack environment config
-    version = env_cfg.get("version", "v0.9.1")
-    model_name = env_cfg.get("model_name", "flux-dev")
-    device = env_cfg.get("device", "cuda")
-    offload = env_cfg.get("offload", False)
-    aggressive_offload = env_cfg.get("aggressive_offload", False)
-    fp8 = env_cfg.get("fp8", False)
-    onnx_provider = env_cfg.get("onnx_provider", "gpu")
-    pretrained_model = env_cfg.get("pretrained_model", None)
-    t5_max_length = env_cfg.get("t5_max_length", 128)
+    version = run_cfg.get("version", "v0.9.1")
+    model_name = run_cfg.get("model_name", "flux-dev")
+    device = run_cfg.get("device", "cuda")
+    offload = run_cfg.get("offload", False)
+    aggressive_offload = run_cfg.get("aggressive_offload", False)
+    fp8 = run_cfg.get("fp8", False)
+    onnx_provider = run_cfg.get("onnx_provider", "gpu")
+    pretrained_model = run_cfg.get("pretrained_model", None)
+    t5_max_length = run_cfg.get("t5_max_length", 128)
 
-    num_steps = env_cfg.get("num_steps", 20)
-    guidance = env_cfg.get("guidance", 4.0)
-    start_step = env_cfg.get("start_step", 0)
-    id_weight = env_cfg.get("id_weight", 1.0)
-    height = env_cfg.get("height", 512)
-    width = env_cfg.get("width", 512)
-    true_cfg = env_cfg.get("true_cfg", 1.0)
-    timestep_to_start_cfg = env_cfg.get("timestep_to_start_cfg", 1)
-    seed = env_cfg.get("seed", -1)
-    neg_prompt = env_cfg.get("neg_prompt", "")
-    gamma = env_cfg.get("gamma", 0.5)
-    eta = env_cfg.get("eta", 0.9)
-    s = env_cfg.get("s", 0)
-    tau = env_cfg.get("tau", 25)
-    use_ipa = env_cfg.get("use_ipa", True)
+    num_steps = run_cfg.get("num_steps", 20)
+    guidance = run_cfg.get("guidance", 4.0)
+    start_step = run_cfg.get("start_step", 0)
+    id_weight = run_cfg.get("id_weight", 1.0)
+    height = run_cfg.get("height", 512)
+    width = run_cfg.get("width", 512)
+    true_cfg = run_cfg.get("true_cfg", 1.0)
+    timestep_to_start_cfg = run_cfg.get("timestep_to_start_cfg", 1)
+    seed = run_cfg.get("seed", -1)
+    neg_prompt = run_cfg.get("neg_prompt", "")
+    gamma = run_cfg.get("gamma", 0.5)
+    eta = run_cfg.get("eta", 0.9)
+    s = run_cfg.get("s", 0)
+    tau = run_cfg.get("tau", 25)
+    use_ipa = run_cfg.get("use_ipa", True)
+    save_inversion = run_cfg.get("save_inversion", False)
 
     # Unpack job config
-    prompt = job_cfg["prompt"]
-    id_image_path = job_cfg.get("id_image", None)
-    output_path = job_cfg.get("output_path", "output.jpg")
+    prompt = data_cfg["prompt"]
+    id_image_path = data_cfg.get("id_image", None)
+    image_path = id_image_path
+
+    output_path = Path(args.output_path)
+    output_path.mkdir(parents=True, exist_ok=True)
+    # Save config
+    with open(output_path / "data_config.yaml", "w") as f:
+        yaml.dump(data_cfg, f)
+        print(f"Data config saved to: {output_path / 'data_config.yaml'}")
+    with open(output_path / "run_config.yaml", "w") as f:
+        yaml.dump(run_cfg, f)
+        print(f"Run config saved to: {output_path / 'run_config.yaml'}")
+    # Save original image
+    if image_path is not None:
+        img = Image.open(image_path)
+        img.save(output_path / "original.jpg")
+        print(f"Original image saved to: {output_path / 'original.jpg'}")
 
     # 3) Create generator
     generator = FluxGenerator(
@@ -421,7 +439,7 @@ def main():
         true_cfg=true_cfg,
         timestep_to_start_cfg=timestep_to_start_cfg,
         max_sequence_length=t5_max_length,
-        image_path=id_image_path,
+        image_path=image_path,
         gamma=gamma,
         eta=eta,
         s=s,
@@ -429,11 +447,12 @@ def main():
     )
 
     # 5) Save output
-    generated_img.save(output_path)
-    print(f"Image saved to: {output_path}")
-    if inverted is not None:
-        inverted.save(output_path.replace(".jpg", "_inverted.jpg"))
-        print(f"Inverted image saved to: {output_path.replace('.jpg', '_inverted.jpg')}")
+    prompt = prompt.replace(" ", "_")
+    generated_img.save(output_path / f'{prompt}.jpg')
+    print(f"Generated image saved to: {output_path / f'{prompt}.jpg'}")
+    if inverted is not None and save_inversion:
+        inverted.save(output_path / "inverted.jpg")
+        print(f"Inverted image saved to: {output_path / 'inverted.jpg'}")
     print(f"Used seed: {used_seed}")
 
 
