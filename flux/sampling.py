@@ -4,6 +4,7 @@ from typing import Callable
 import torch
 from einops import rearrange, repeat
 from torch import Tensor
+from tqdm import tqdm
 
 from .model import Flux
 from .modules.conditioner import HFEmbedder
@@ -93,6 +94,137 @@ def get_schedule(
 
     return timesteps.tolist()
 
+def rf_inversion(
+    model: Flux,
+    img: Tensor,
+    img_ids: Tensor,
+    txt: Tensor,
+    txt_ids: Tensor,
+    vec: Tensor,
+    timesteps: list[float],
+    guidance: float = 4.0,
+    id_weight=1.0,
+    id=None,
+    start_step=0,
+    uncond_id=None,
+    true_cfg=1.0,
+    timestep_to_start_cfg=1,
+    neg_txt=None,
+    neg_txt_ids=None,
+    neg_vec=None,
+    aggressive_offload=False,
+    y_1: Tensor = None,
+    gamma: float = 0.5,
+):
+    # reverse the timesteps
+    timesteps = timesteps[::-1]
+    guidance_vec = torch.full((img.shape[0],), guidance, device=img.device, dtype=img.dtype)
+    use_true_cfg = abs(true_cfg - 1.0) > 1e-2
+    for i in tqdm(range(len(timesteps) - 1), desc="Inverting"):
+        t_i = i / len(timesteps)
+        t_vec = torch.full((img.shape[0],), t_i, dtype=img.dtype, device=img.device)
+        pred = model(
+            img=img,
+            img_ids=img_ids,
+            txt=txt,
+            txt_ids=txt_ids,
+            y=vec,
+            timesteps=t_vec,
+            guidance=guidance_vec,
+            id=id if (len(timesteps) - 1 - i) >= start_step else None,
+            id_weight=id_weight,
+            aggressive_offload=aggressive_offload,
+        )
+
+        if use_true_cfg and i >= timestep_to_start_cfg:
+            neg_pred = model(
+                img=img,
+                img_ids=img_ids,
+                txt=neg_txt,
+                txt_ids=neg_txt_ids,
+                y=neg_vec,
+                timesteps=t_vec,
+                guidance=guidance_vec,
+                id=uncond_id if (len(timesteps) - 1 - i) >= start_step else None,
+                id_weight=id_weight,
+                aggressive_offload=aggressive_offload,
+            )
+            pred = neg_pred + true_cfg * (pred - neg_pred)
+
+        assert (1 - t_i) != 0
+        u_t_i_cond = (y_1 - img) / (1 - t_i)
+        pred = pred + gamma * (u_t_i_cond - pred)
+
+        img = img + (timesteps[i+1] - timesteps[i]) * pred
+
+    return img
+
+def rf_denoise(
+    model: Flux,
+    img: Tensor,
+    img_ids: Tensor,
+    txt: Tensor,
+    txt_ids: Tensor,
+    vec: Tensor,
+    timesteps: list[float],
+    guidance: float = 4.0,
+    id_weight=1.0,
+    id=None,
+    start_step=0,
+    uncond_id=None,
+    true_cfg=1.0,
+    timestep_to_start_cfg=1,
+    neg_txt=None,
+    neg_txt_ids=None,
+    neg_vec=None,
+    aggressive_offload=False,
+    y_0: Tensor = None,
+    eta=0.9,
+    s=0,
+    tau=6,
+):
+    guidance_vec = torch.full((img.shape[0],), guidance, device=img.device, dtype=img.dtype)
+    use_true_cfg = abs(true_cfg - 1.0) > 1e-2
+    for i in tqdm(range(len(timesteps) - 1), desc="Denoising"):
+        t_i = i / len(timesteps)
+        t_vec = torch.full((img.shape[0],), 1-t_i, dtype=img.dtype, device=img.device)
+        pred = model(
+            img=img,
+            img_ids=img_ids,
+            txt=txt,
+            txt_ids=txt_ids,
+            y=vec,
+            timesteps=t_vec,
+            guidance=guidance_vec,
+            id=id if i >= start_step else None,
+            id_weight=id_weight,
+            aggressive_offload=aggressive_offload,
+        )
+
+        if use_true_cfg and i >= timestep_to_start_cfg:
+            neg_pred = model(
+                img=img,
+                img_ids=img_ids,
+                txt=neg_txt,
+                txt_ids=neg_txt_ids,
+                y=neg_vec,
+                timesteps=t_vec,
+                guidance=guidance_vec,
+                id=uncond_id if i >= start_step else None,
+                id_weight=id_weight,
+                aggressive_offload=aggressive_offload,
+            )
+            pred = neg_pred + true_cfg * (pred - neg_pred)
+        pred = -pred
+
+        assert (1 - t_i) != 0
+        v_t_cond = (y_0 - img) / (1 - t_i)
+        eta_t = eta if s <= i < tau else 0
+        pred = pred + eta_t * (v_t_cond - pred)
+        
+        img = img + (timesteps[i] - timesteps[i+1]) * pred
+
+    return img
 
 def denoise(
     model: Flux,

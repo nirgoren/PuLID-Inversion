@@ -1,3 +1,3 @@
-prompt: "A man exploring the jungle"
-id_image: "images/nir.jpeg"
+prompt: "An angry bald man"
+id_image: "example_inputs/lecun.jpg"
 output_path: "generated_image.jpg"
