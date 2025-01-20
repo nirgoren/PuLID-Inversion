@@ -11,7 +11,7 @@ t5_max_length: 128
 num_steps: 28
 guidance: 5.0
 start_step: 0
-id_weight: 1.0
+id_weight: 0.35
 height: 896
 width: 896
 true_cfg: 1.0
@@ -19,8 +19,8 @@ timestep_to_start_cfg: 1
 seed: 42
 # neg_prompt: "bad quality, worst quality, text, signature, watermark"
 neg_prompt: ""
-use_ipa: false
+use_ipa: true
 gamma: 0.5
 eta: 0.7
 s: 0
-tau: 5
+tau: 4
