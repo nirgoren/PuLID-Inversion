@@ -156,6 +156,8 @@ class FluxGenerator:
         eta: float = 0.9,
         s: float = 0,
         tau: float = 6,
+        perform_inversion: bool = True,
+        perform_reconstruction: bool = True,
     ):
         """
         Core function that performs the image generation.
@@ -243,37 +245,54 @@ class FluxGenerator:
         y_0 = inp["img"].clone().detach()
 
         inverted = None
-        inverted = rf_inversion(
-            self.model,
-            **inp_inversion,
-            timesteps=timesteps,
-            guidance=opts.guidance,
-            id=id_embeddings,
-            id_weight=id_weight,
-            start_step=start_step,
-            uncond_id=uncond_id_embeddings,
-            true_cfg=true_cfg,
-            timestep_to_start_cfg=timestep_to_start_cfg,
-            neg_txt=inp_neg["txt"] if use_true_cfg else None,
-            neg_txt_ids=inp_neg["txt_ids"] if use_true_cfg else None,
-            neg_vec=inp_neg["vec"] if use_true_cfg else None,
-            aggressive_offload=self.aggressive_offload,
-            y_1=noise,
-            gamma=gamma
-        )
 
-        # img = noise
-        img = inverted
-        # bs, c, h, w = img.shape
-        # img_ids = torch.zeros(h // 2, w // 2, 3)
-        # img_ids[..., 1] = img_ids[..., 1] + torch.arange(h // 2)[:, None]
-        # img_ids[..., 2] = img_ids[..., 2] + torch.arange(w // 2)[None, :]
-        # img_ids = repeat(img_ids, "h w c -> b (h w) c", b=bs)
+        if perform_inversion:
+            inverted = rf_inversion(
+                self.model,
+                **inp_inversion,
+                timesteps=timesteps,
+                guidance=opts.guidance,
+                id=id_embeddings,
+                id_weight=id_weight,
+                start_step=start_step,
+                uncond_id=uncond_id_embeddings,
+                true_cfg=true_cfg,
+                timestep_to_start_cfg=timestep_to_start_cfg,
+                neg_txt=inp_neg["txt"] if use_true_cfg else None,
+                neg_txt_ids=inp_neg["txt_ids"] if use_true_cfg else None,
+                neg_vec=inp_neg["vec"] if use_true_cfg else None,
+                aggressive_offload=self.aggressive_offload,
+                y_1=noise,
+                gamma=gamma
+            )
+
+            img = inverted
+        else:
+            img = noise
         inp["img"] = img
-        # inp["img_ids"] = img_ids
-        if use_true_cfg:
-            inp_neg["img"] = img
-            # inp_neg["img_ids"] = img_ids
+        inp_inversion["img"] = img
+
+        if perform_reconstruction:
+            recon = rf_denoise(
+                self.model,
+                **inp_inversion,
+                timesteps=timesteps,
+                guidance=opts.guidance,
+                id=id_embeddings,
+                id_weight=id_weight,
+                start_step=start_step,
+                uncond_id=uncond_id_embeddings,
+                true_cfg=true_cfg,
+                timestep_to_start_cfg=timestep_to_start_cfg,
+                neg_txt=inp_neg["txt"] if use_true_cfg else None,
+                neg_txt_ids=inp_neg["txt_ids"] if use_true_cfg else None,
+                neg_vec=inp_neg["vec"] if use_true_cfg else None,
+                aggressive_offload=self.aggressive_offload,
+                y_0=y_0,
+                eta=eta,
+                s=s,
+                tau=tau,
+            )
 
         x = rf_denoise(
             self.model,
@@ -296,24 +315,6 @@ class FluxGenerator:
             tau=tau,
         )
 
-        # 4) Denoise
-        # x = denoise(
-        #     self.model,
-        #     **inp,
-        #     timesteps=timesteps,
-        #     guidance=opts.guidance,
-        #     id=id_embeddings,
-        #     id_weight=id_weight,
-        #     start_step=start_step,
-        #     uncond_id=uncond_id_embeddings,
-        #     true_cfg=true_cfg,
-        #     timestep_to_start_cfg=timestep_to_start_cfg,
-        #     neg_txt=inp_neg["txt"] if use_true_cfg else None,
-        #     neg_txt_ids=inp_neg["txt_ids"] if use_true_cfg else None,
-        #     neg_vec=inp_neg["vec"] if use_true_cfg else None,
-        #     aggressive_offload=self.aggressive_offload,
-        # )
-
         # Offload flux model, load auto-decoder
         if self.offload:
             self.model.cpu()
@@ -329,6 +330,11 @@ class FluxGenerator:
             inverted = unpack(inverted.float(), opts.height, opts.width)
             with torch.autocast(device_type=self.device.type, dtype=torch.bfloat16):
                 inverted = self.ae.decode(inverted)
+        
+        if recon is not None:
+            recon = unpack(recon.float(), opts.height, opts.width)
+            with torch.autocast(device_type=self.device.type, dtype=torch.bfloat16):
+                recon = self.ae.decode(recon)
 
         if self.offload:
             self.ae.decoder.cpu()
@@ -346,8 +352,13 @@ class FluxGenerator:
             inverted = inverted.clamp(-1, 1)
             inverted = rearrange(inverted[0], "c h w -> h w c")
             inverted = Image.fromarray((127.5 * (inverted + 1.0)).cpu().byte().numpy())
+        
+        if recon is not None:
+            recon = recon.clamp(-1, 1)
+            recon = rearrange(recon[0], "c h w -> h w c")
+            recon = Image.fromarray((127.5 * (recon + 1.0)).cpu().byte().numpy())
 
-        return img, inverted, opts.seed
+        return img, inverted, recon, opts.seed
 
 
 def main():
@@ -391,7 +402,9 @@ def main():
     s = run_cfg.get("s", 0)
     tau = run_cfg.get("tau", 25)
     use_ipa = run_cfg.get("use_ipa", True)
+    perform_inversion = run_cfg.get("perform_inversion", True)
     save_inversion = run_cfg.get("save_inversion", False)
+    perform_reconstruction = run_cfg.get("perform_reconstruction", True)
 
     # Unpack job config
     prompt = data_cfg["prompt"]
@@ -426,7 +439,7 @@ def main():
     )
 
     # 4) Generate image
-    generated_img, inverted, used_seed = generator.generate_image(
+    generated_img, inverted, recon, used_seed = generator.generate_image(
         prompt=prompt,
         id_image_path=id_image_path if use_ipa else None,
         width=width,
@@ -445,6 +458,8 @@ def main():
         eta=eta,
         s=s,
         tau=tau,
+        perform_inversion=perform_inversion,
+        perform_reconstruction=perform_reconstruction,
     )
 
     # 5) Save output
@@ -454,6 +469,9 @@ def main():
     if inverted is not None and save_inversion:
         inverted.save(output_path / "inverted.jpg")
         print(f"Inverted image saved to: {output_path / 'inverted.jpg'}")
+    if recon is not None:
+        recon.save(output_path / "reconstruction.jpg")
+        print(f"Reconstructed image saved to: {output_path / 'reconstruction.jpg'}")
     print(f"Used seed: {used_seed}")
     find_and_plot_images(output_path, output_path / "results.jpg", recursive=False)
 
