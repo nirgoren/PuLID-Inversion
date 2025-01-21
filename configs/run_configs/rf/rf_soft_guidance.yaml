@@ -9,18 +9,18 @@ onnx_provider: "gpu"
 pretrained_model: null
 t5_max_length: 128
 num_steps: 28
-guidance: 5.0
+guidance: 3.0
 start_step: 0
-id_weight: 0.7
+id_weight: 0.0
 height: 1024
 width: 1024
-true_cfg: 3
+true_cfg: 3.5
 timestep_to_start_cfg: 1
 seed: 42
 # neg_prompt: "bad quality, worst quality, text, signature, watermark"
 neg_prompt: ""
-use_ipa: true
+use_ipa: false
 gamma: 0.5
-eta: 0.5
+eta: 0.8
 s: 0
-tau: 5
+tau: 6
