@@ -7,6 +7,7 @@ tmp/*
 weights/*
 inputs/*
 models/*
+comparisons/*
 flux_dev_fp8_quantized_model.pth
 
 *.DS_Store

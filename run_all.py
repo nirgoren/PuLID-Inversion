@@ -2,13 +2,13 @@ from pathlib import Path
 import subprocess
 
 # Directories
-run_yaml_dir = Path("configs/run_configs")
+run_yaml_dir = Path("configs/run_configs/pulid")
 data_yaml_dir = Path("configs/data_configs/people")
 output_base_dir = Path("results")
 
-# Get all YAML files in the specified directories
-run_yaml_files = list(run_yaml_dir.glob("*.yaml"))
-data_yaml_files = list(data_yaml_dir.glob("*.yaml"))
+# Get all YAML files in the specified directories (recursive search)
+run_yaml_files = list(run_yaml_dir.rglob("*.yaml"))
+data_yaml_files = list(data_yaml_dir.rglob("*.yaml"))
 
 # Iterate through all combinations of run_yaml and data_yaml
 for run_yaml_path in run_yaml_files:
