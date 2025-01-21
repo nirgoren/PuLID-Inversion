@@ -9,6 +9,7 @@ inputs/*
 models/*
 comparisons/*
 flux_dev_fp8_quantized_model.pth
+array_outputs/*
 
 *.DS_Store
 

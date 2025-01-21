@@ -153,7 +153,7 @@ def load_flow_model_quintized(
     name: str,
     device: str = "cuda",
     hf_download: bool = True,
-    cache_path: str = "flux_dev_fp8_quantized_model.pth",
+    cache_path: str = None,
 ):
     """
     Loads (or downloads) a FLUX-fp8 checkpoint, performs quantization once,
@@ -165,6 +165,10 @@ def load_flow_model_quintized(
     :param cache_path: Filepath for cached quantized model
     :return: A quantized FLUX model on the specified device.
     """
+    if cache_path is None:
+        cache_path = os.path.join(os.path.expanduser("~"), ".cache/flux_dev_fp8_quantized_model.pth")
+
+
 
     # 1) Check if we already have a cached, quantized model
     if os.path.exists(cache_path):
