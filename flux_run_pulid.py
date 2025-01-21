@@ -14,6 +14,7 @@ import os
 # adjust as appropriate:
 # -------------------------------------------------------------------
 from flux.sampling import denoise, get_noise, get_schedule, prepare, unpack, rf_denoise, rf_inversion
+from flux.image_utils import find_and_plot_images
 from flux.util import (
     SamplingOptions,
     load_ae,
@@ -454,6 +455,7 @@ def main():
         inverted.save(output_path / "inverted.jpg")
         print(f"Inverted image saved to: {output_path / 'inverted.jpg'}")
     print(f"Used seed: {used_seed}")
+    find_and_plot_images(output_path, output_path / "results.jpg", recursive=False)
 
 
 if __name__ == "__main__":
