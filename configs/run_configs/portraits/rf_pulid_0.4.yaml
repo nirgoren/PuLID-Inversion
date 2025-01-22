@@ -9,7 +9,7 @@ onnx_provider: "gpu"
 pretrained_model: null
 t5_max_length: 128
 num_steps: 28
-guidance: 3
+guidance: 3.5
 start_step: 0
 id_weight: 0.4
 height: 1024

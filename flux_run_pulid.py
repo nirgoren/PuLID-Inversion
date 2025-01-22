@@ -158,6 +158,7 @@ class FluxGenerator:
         tau: float = 6,
         perform_inversion: bool = True,
         perform_reconstruction: bool = True,
+        inversion_true_cfg: float = 1.0,
     ):
         """
         Core function that performs the image generation.
@@ -256,7 +257,7 @@ class FluxGenerator:
                 id_weight=id_weight,
                 start_step=start_step,
                 uncond_id=uncond_id_embeddings,
-                true_cfg=true_cfg,
+                true_cfg=inversion_true_cfg,
                 timestep_to_start_cfg=timestep_to_start_cfg,
                 neg_txt=inp_neg["txt"] if use_true_cfg else None,
                 neg_txt_ids=inp_neg["txt_ids"] if use_true_cfg else None,
@@ -282,7 +283,7 @@ class FluxGenerator:
                 id_weight=id_weight,
                 start_step=start_step,
                 uncond_id=uncond_id_embeddings,
-                true_cfg=true_cfg,
+                true_cfg=inversion_true_cfg,
                 timestep_to_start_cfg=timestep_to_start_cfg,
                 neg_txt=inp_neg["txt"] if use_true_cfg else None,
                 neg_txt_ids=inp_neg["txt_ids"] if use_true_cfg else None,
