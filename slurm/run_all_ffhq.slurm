@@ -5,8 +5,8 @@
 #SBATCH --error=array_outputs/pulid-inversion-ffhq%a.err   # Redirect stderr
 #SBATCH --partition=killable
 #SBATCH --account=gpu-research
-#SBATCH --exclude=rack-omerl-g01,rack-bgw-dgx1,rack-gww-dgx1,n-[202-205],n-[501-503],n-[301-307],n-[350-351]
-#SBATCH --time=180  # Max time (minutes)
+#SBATCH --exclude=rack-omerl-g01,rack-bgw-dgx1,rack-gww-dgx1,n-[202-205],n-[301-302],n-[501-503] # ,n-[350-351]
+#SBATCH --time=90  # Max time (minutes)
 
 #SBATCH --ntasks=1  # Number of processes
 #SBATCH --gpus=1    # GPUs in total
@@ -22,19 +22,19 @@ fi
 # Define tasks for each job
 case $SLURM_ARRAY_TASK_ID in
     1)
-        python run_all.py --run_yaml_dir configs/run_configs/rf/rf_soft_guidance.yaml --data_yaml_dir $data_config_dir --output_base_dir $base_output_dir
+        python run_all.py --run_yaml_dir configs/run_configs/ffhq/rf_pulid_0.0.yaml --data_yaml_dir $data_config_dir --output_base_dir $base_output_dir
         ;;
     2)
-        python run_all.py --run_yaml_dir configs/run_configs/pulid/rf_pulid_0.4.yaml --data_yaml_dir $data_config_dir --output_base_dir $base_output_dir
+        python run_all.py --run_yaml_dir configs/run_configs/ffhq/rf_pulid_0.4.yaml --data_yaml_dir $data_config_dir --output_base_dir $base_output_dir
         ;;
     3)
-        python run_all.py --run_yaml_dir configs/run_configs/pulid/rf_pulid_0.5.yaml --data_yaml_dir $data_config_dir --output_base_dir $base_output_dir
+        python run_all.py --run_yaml_dir configs/run_configs/ffhq/rf_pulid_0.5.yaml --data_yaml_dir $data_config_dir --output_base_dir $base_output_dir
         ;;
     4)
-        python run_all.py --run_yaml_dir configs/run_configs/pulid/rf_pulid_0.6.yaml --data_yaml_dir $data_config_dir --output_base_dir $base_output_dir
+        python run_all.py --run_yaml_dir configs/run_configs/ffhq/rf_pulid_0.6.yaml --data_yaml_dir $data_config_dir --output_base_dir $base_output_dir
         ;;
     5)
-        python run_all.py --run_yaml_dir configs/run_configs/pulid/rf_pulid_0.7.yaml --data_yaml_dir $data_config_dir --output_base_dir $base_output_dir
+        python run_all.py --run_yaml_dir configs/run_configs/ffhq/rf_pulid_0.7.yaml --data_yaml_dir $data_config_dir --output_base_dir $base_output_dir
         ;;
     *)
         echo "Invalid SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID"
