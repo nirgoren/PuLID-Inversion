@@ -1,19 +1,19 @@
 #!/bin/bash
 
-#SBATCH --job-name=pulid-inversion
-#SBATCH --output=array_outputs/pulid-inversion%a.out  # Redirect stdout
-#SBATCH --error=array_outputs/pulid-inversion%a.err   # Redirect stderr
+#SBATCH --job-name=pulid-inversion-ffhq
+#SBATCH --output=array_outputs/pulid-inversion-ffhq%a.out  # Redirect stdout
+#SBATCH --error=array_outputs/pulid-inversion-ffhq%a.err   # Redirect stderr
 #SBATCH --partition=killable
 #SBATCH --account=gpu-research
 #SBATCH --exclude=rack-omerl-g01,rack-bgw-dgx1,rack-gww-dgx1,n-[202-205],n-[501-503],n-[301-307],n-[350-351]
-#SBATCH --time=60  # Max time (minutes)
+#SBATCH --time=180  # Max time (minutes)
 
 #SBATCH --ntasks=1  # Number of processes
 #SBATCH --gpus=1    # GPUs in total
-#SBATCH --array=3-5 # Array range (one task per job)
+#SBATCH --array=1-5 # Array range (one task per job)
 
-data_config_dir=configs/data_configs/people/
-base_output_dir=results/
+data_config_dir=configs/data_configs/ffhq_yamls
+base_output_dir=results/ffhq
 
 if [ "$#" -eq 2 ]; then
     data_config_dir=$1
