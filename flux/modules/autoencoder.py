@@ -303,6 +303,11 @@ class AutoEncoder(nn.Module):
         z = self.reg(self.encoder(x))
         z = self.scale_factor * (z - self.shift_factor)
         return z
+    
+    def encode_no_sampling(self, x: Tensor) -> Tensor:
+        z, _ = torch.chunk(self.encoder(x), 2, dim=1)
+        z = self.scale_factor * (z - self.shift_factor)
+        return z
 
     def decode(self, z: Tensor) -> Tensor:
         z = z / self.scale_factor + self.shift_factor

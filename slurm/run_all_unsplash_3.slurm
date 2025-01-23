@@ -1,8 +1,8 @@
 #!/bin/bash
 
-#SBATCH --job-name=pulid-inversion-unsplash2
-#SBATCH --output=array_outputs/pulid-inversion-unsplash2%a.out  # Redirect stdout
-#SBATCH --error=array_outputs/pulid-inversion-unsplash2%a.err   # Redirect stderr
+#SBATCH --job-name=pulid-inversion-unsplash3
+#SBATCH --output=array_outputs/pulid-inversion-unsplash3%a.out  # Redirect stdout
+#SBATCH --error=array_outputs/pulid-inversion-unsplash3%a.err   # Redirect stderr
 #SBATCH --partition=killable
 #SBATCH --account=gpu-research
 #SBATCH --exclude=rack-omerl-g01,rack-bgw-dgx1,rack-gww-dgx1,n-[202-205],n-[301-302],n-[501-503],n-602 # ,n-[350-351]
@@ -13,7 +13,7 @@
 #SBATCH --array=1-7 # Array range (one task per job)
 
 data_config_dir=configs/data_configs/unsplash_yamls
-base_output_dir=results/unsplash2
+base_output_dir=results/unsplash3
 
 if [ "$#" -eq 2 ]; then
     data_config_dir=$1

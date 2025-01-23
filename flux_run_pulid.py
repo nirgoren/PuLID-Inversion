@@ -117,13 +117,7 @@ class FluxGenerator:
 
         # 2) Encode with autocast
         with torch.autocast(device_type=self.device.type, dtype=torch.bfloat16):
-            encoded = self.ae.encode(x)
-            # If 'encode' returns a distribution object, sample from it:
-            if hasattr(encoded, "latent_dist"):
-                x = encoded.latent_dist.sample()
-            else:
-                # Otherwise, assume it returns latents directly
-                x = encoded
+            x = self.ae.encode_no_sampling(x)
 
         # 3) Offload if needed
         if self.offload:
@@ -158,6 +152,7 @@ class FluxGenerator:
         tau: float = 6,
         perform_inversion: bool = True,
         perform_reconstruction: bool = True,
+        perform_editing: bool = True,
         inversion_true_cfg: float = 1.0,
     ):
         """
@@ -246,7 +241,6 @@ class FluxGenerator:
         y_0 = inp["img"].clone().detach()
 
         inverted = None
-
         if perform_inversion:
             inverted = rf_inversion(
                 self.model,
@@ -273,6 +267,7 @@ class FluxGenerator:
         inp["img"] = img
         inp_inversion["img"] = img
 
+        recon = None
         if perform_reconstruction:
             recon = rf_denoise(
                 self.model,
@@ -295,26 +290,28 @@ class FluxGenerator:
                 tau=tau,
             )
 
-        x = rf_denoise(
-            self.model,
-            **inp,
-            timesteps=timesteps,
-            guidance=opts.guidance,
-            id=id_embeddings,
-            id_weight=id_weight,
-            start_step=start_step,
-            uncond_id=uncond_id_embeddings,
-            true_cfg=true_cfg,
-            timestep_to_start_cfg=timestep_to_start_cfg,
-            neg_txt=inp_neg["txt"] if use_true_cfg else None,
-            neg_txt_ids=inp_neg["txt_ids"] if use_true_cfg else None,
-            neg_vec=inp_neg["vec"] if use_true_cfg else None,
-            aggressive_offload=self.aggressive_offload,
-            y_0=y_0,
-            eta=eta,
-            s=s,
-            tau=tau,
-        )
+        edited = None
+        if perform_editing:
+            edited = rf_denoise(
+                self.model,
+                **inp,
+                timesteps=timesteps,
+                guidance=opts.guidance,
+                id=id_embeddings,
+                id_weight=id_weight,
+                start_step=start_step,
+                uncond_id=uncond_id_embeddings,
+                true_cfg=true_cfg,
+                timestep_to_start_cfg=timestep_to_start_cfg,
+                neg_txt=inp_neg["txt"] if use_true_cfg else None,
+                neg_txt_ids=inp_neg["txt_ids"] if use_true_cfg else None,
+                neg_vec=inp_neg["vec"] if use_true_cfg else None,
+                aggressive_offload=self.aggressive_offload,
+                y_0=y_0,
+                eta=eta,
+                s=s,
+                tau=tau,
+            )
 
         # Offload flux model, load auto-decoder
         if self.offload:
@@ -323,9 +320,10 @@ class FluxGenerator:
             self.ae.decoder.to(x.device)
 
         # 5) Decode latents
-        x = unpack(x.float(), opts.height, opts.width)
-        with torch.autocast(device_type=self.device.type, dtype=torch.bfloat16):
-            x = self.ae.decode(x)
+        if edited is not None:
+            edited = unpack(edited.float(), opts.height, opts.width)
+            with torch.autocast(device_type=self.device.type, dtype=torch.bfloat16):
+                edited = self.ae.decode(edited)
 
         if inverted is not None:
             inverted = unpack(inverted.float(), opts.height, opts.width)
@@ -345,9 +343,10 @@ class FluxGenerator:
         print(f"Done in {t1 - t0:.2f} seconds.")
 
         # Convert to PIL
-        x = x.clamp(-1, 1)
-        x = rearrange(x[0], "c h w -> h w c")
-        img = Image.fromarray((127.5 * (x + 1.0)).cpu().byte().numpy())
+        if edited is not None:
+            edited = edited.clamp(-1, 1)
+            edited = rearrange(edited[0], "c h w -> h w c")
+            edited = Image.fromarray((127.5 * (edited + 1.0)).cpu().byte().numpy())
 
         if inverted is not None:
             inverted = inverted.clamp(-1, 1)
@@ -359,7 +358,7 @@ class FluxGenerator:
             recon = rearrange(recon[0], "c h w -> h w c")
             recon = Image.fromarray((127.5 * (recon + 1.0)).cpu().byte().numpy())
 
-        return img, inverted, recon, opts.seed
+        return edited, inverted, recon, opts.seed
 
 
 def main():
@@ -406,6 +405,7 @@ def main():
     perform_inversion = run_cfg.get("perform_inversion", True)
     save_inversion = run_cfg.get("save_inversion", False)
     perform_reconstruction = run_cfg.get("perform_reconstruction", True)
+    perform_editing = run_cfg.get("perform_editing", True)
 
     # Unpack job config
     prompt = data_cfg["prompt"]
@@ -461,12 +461,14 @@ def main():
         tau=tau,
         perform_inversion=perform_inversion,
         perform_reconstruction=perform_reconstruction,
+        perform_editing=perform_editing,
     )
 
     # 5) Save output
     prompt = prompt.replace(" ", "_")
-    generated_img.save(output_path / f'{prompt}.jpg')
-    print(f"Generated image saved to: {output_path / f'{prompt}.jpg'}")
+    if generated_img is not None:
+        generated_img.save(output_path / f'{prompt}.jpg')
+        print(f"Generated image saved to: {output_path / f'{prompt}.jpg'}")
     if inverted is not None and save_inversion:
         inverted.save(output_path / "inverted.jpg")
         print(f"Inverted image saved to: {output_path / 'inverted.jpg'}")
