@@ -38,12 +38,38 @@
             "console": "integratedTerminal",
             "args": [
                 "--run_yaml",
-                "configs/run_configs/rf_pulid.yaml",
+                "configs/run_configs/rf_pulid_0.7.yaml",
                 "--data_yaml",
-                "configs/data_configs/people/7.yaml",
+                "configs/data_configs/portraits/nir.yaml",
                 "--output_path",
                 "results/debug/pulid"
             ]
-        }
+        },
+        {
+            "name": "debug inversion portrait",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "flux_run_pulid.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--run_yaml",
+                "configs/run_configs/portraits/rf_pulid_0.6.yaml",
+                "--data_yaml",
+                "configs/data_configs/unsplash_yamls/bui-hoang-long-m8sxWUl1oKQ-unsplash.yaml",
+                "--output_path",
+                "results/debug/unsplash_pulid"
+            ]
+        },
+        {
+            "name": "debug app tight",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "app_tight_inversion_pulid.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--offload",
+                "--fp8"
+            ]
+        },
     ]
 }

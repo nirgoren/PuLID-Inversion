@@ -1,20 +1,12 @@
-import argparse
-from pathlib import Path
 import time
+
+import gradio as gr
 import numpy as np
-import yaml
 import torch
 from einops import rearrange, repeat
 from PIL import Image
-import os
 
-# -------------------------------------------------------------------
-# The following imports must match your environment or local modules:
-# If you have local modules named similarly to the original snippet,
-# adjust as appropriate:
-# -------------------------------------------------------------------
-from flux.sampling import denoise, get_noise, get_schedule, prepare, unpack, rf_denoise, rf_inversion
-from flux.image_utils import find_and_plot_images
+from flux.sampling import denoise, get_noise, get_schedule, prepare, rf_denoise, rf_inversion, unpack
 from flux.util import (
     SamplingOptions,
     load_ae,
@@ -27,79 +19,46 @@ from pulid.pipeline_flux import PuLIDPipeline
 from pulid.utils import resize_numpy_image_long
 
 
-def get_models(model_name: str, device: torch.device, offload: bool, fp8: bool,
-               onnx_provider: str = "gpu"):
-    """
-    Loads T5, CLIP, FLUX flow-model, and autoencoder for the given 'model_name'.
-    """
+def get_models(name: str, device: torch.device, offload: bool, fp8: bool):
     t5 = load_t5(device, max_length=128)
-    clip_model = load_clip(device)
+    clip = load_clip(device)
     if fp8:
-        model = load_flow_model_quintized(model_name, device="cpu" if offload else device)
+        model = load_flow_model_quintized(name, device="cpu" if offload else device)
     else:
-        model = load_flow_model(model_name, device="cpu" if offload else device)
+        model = load_flow_model(name, device="cpu" if offload else device)
     model.eval()
-    ae = load_ae(model_name, device="cpu" if offload else device)
-
-    # Also create the PuLID pipeline for ID embedding
-    pulid_model = PuLIDPipeline(model, device="cpu" if offload else device,
-                                weight_dtype=torch.bfloat16,
-                                onnx_provider=onnx_provider)
-    return model, ae, t5, clip_model, pulid_model
+    ae = load_ae(name, device="cpu" if offload else device)
+    return model, ae, t5, clip
 
 
 class FluxGenerator:
-    def __init__(
-        self,
-        model_name: str,
-        device: str,
-        offload: bool,
-        aggressive_offload: bool,
-        fp8: bool,
-        onnx_provider: str,
-        pulid_pretrained_path: str,
-        pulid_version: str,
-    ):
+    def __init__(self, model_name: str, device: str, offload: bool, aggressive_offload: bool, args):
         self.device = torch.device(device)
         self.offload = offload
         self.aggressive_offload = aggressive_offload
         self.model_name = model_name
-
-        # Load models
-        model, ae, t5, clip_model, pulid_model = get_models(
-            model_name=model_name,
+        self.model, self.ae, self.t5, self.clip_model = get_models(
+            model_name,
             device=self.device,
-            offload=offload,
-            fp8=fp8,
-            onnx_provider=onnx_provider,
+            offload=self.offload,
+            fp8=args.fp8,
         )
-
-        self.model = model
-        self.ae = ae
-        self.t5 = t5
-        self.clip_model = clip_model
-        self.pulid_model = pulid_model
-
-        # Move some parts to GPU for face/ID detection if offload is enabled
+        self.pulid_model = PuLIDPipeline(self.model, device="cpu" if offload else device, weight_dtype=torch.bfloat16,
+                                         onnx_provider=args.onnx_provider)
         if offload:
-            self.pulid_model.face_helper.face_det.mean_tensor = \
-                self.pulid_model.face_helper.face_det.mean_tensor.to(torch.device("cuda"))
+            self.pulid_model.face_helper.face_det.mean_tensor = self.pulid_model.face_helper.face_det.mean_tensor.to(torch.device("cuda"))
             self.pulid_model.face_helper.face_det.device = torch.device("cuda")
             self.pulid_model.face_helper.device = torch.device("cuda")
             self.pulid_model.device = torch.device("cuda")
-
-        self.pulid_model.load_pretrain(pulid_pretrained_path, version=pulid_version)
+        self.pulid_model.load_pretrain(args.pretrained_model, version=args.version)
 
     # function to encode an image into latents
-    def encode_image_to_latents(self, img_path, opts):
+    def encode_image_to_latents(self, img, opts):
         """
         Opposite of decode: Takes a PIL image and encodes it into latents (x).
         """
         t0 = time.perf_counter()
-
-        # 1) Load and preprocess PIL image
-        img = Image.open(img_path).convert("RGB")
-        # Resize if necessary, or use opts.height / opts.width if you want a fixed size:
+        img = Image.fromarray(img)
         img = img.resize((opts.width, opts.height), resample=Image.LANCZOS)
 
         # Convert image to torch.Tensor and scale to [-1, 1]
@@ -117,8 +76,7 @@ class FluxGenerator:
 
         # 2) Encode with autocast
         with torch.autocast(device_type=self.device.type, dtype=torch.bfloat16):
-            # x = self.ae.encode_no_sampling(x)
-            x = self.ae.encode(x)
+            x = self.ae.encode_no_sampling(x)
 
         # 3) Offload if needed
         if self.offload:
@@ -134,7 +92,7 @@ class FluxGenerator:
     def generate_image(
         self,
         prompt: str,
-        id_image_path: str = None,
+        id_image = None,
         width: int = 512,
         height: int = 512,
         num_steps: int = 20,
@@ -146,13 +104,12 @@ class FluxGenerator:
         true_cfg: float = 1.0,
         timestep_to_start_cfg: int = 1,
         max_sequence_length: int = 128,
-        image_path: str = None,
         gamma: float = 0.5,
-        eta: float = 0.9,
+        eta: float = 0.7,
         s: float = 0,
-        tau: float = 6,
+        tau: float = 5,
         perform_inversion: bool = True,
-        perform_reconstruction: bool = True,
+        perform_reconstruction: bool = False,
         perform_editing: bool = True,
         inversion_true_cfg: float = 1.0,
     ):
@@ -162,6 +119,7 @@ class FluxGenerator:
         self.t5.max_length = max_sequence_length
 
         # If seed == -1, random
+        seed = int(seed)
         if seed == -1:
             seed = None
 
@@ -173,8 +131,6 @@ class FluxGenerator:
             guidance=guidance,
             seed=seed,
         )
-
-        torch.manual_seed(opts.seed)
 
         if opts.seed is None:
             opts.seed = torch.Generator(device="cpu").seed()
@@ -198,7 +154,7 @@ class FluxGenerator:
         if noise.shape[0] == 1 and bs > 1:
             noise = repeat(noise, "1 ... -> bs ...", bs=bs)
         # encode
-        x = self.encode_image_to_latents(image_path, opts)
+        x = self.encode_image_to_latents(id_image, opts)
         
         timesteps = get_schedule(opts.num_steps, x.shape[-1] * x.shape[-2] // 4, shift=False)
 
@@ -223,13 +179,12 @@ class FluxGenerator:
         # 3) ID Embeddings (optional)
         id_embeddings = None
         uncond_id_embeddings = None
-        if id_image_path is not None and os.path.exists(id_image_path):
-            id_image = Image.open(id_image_path).convert("RGB")
-            id_image = np.array(id_image)
+        if id_image is not None:
             id_image = resize_numpy_image_long(id_image, 1024)
-            id_embeddings, uncond_id_embeddings = self.pulid_model.get_id_embedding(
-                id_image, cal_uncond=use_true_cfg
-            )
+            id_embeddings, uncond_id_embeddings = self.pulid_model.get_id_embedding(id_image, cal_uncond=use_true_cfg)
+        else:
+            id_embeddings = None
+            uncond_id_embeddings = None
 
         # Offload ID pipeline, load main FLUX model to GPU
         if self.offload:
@@ -361,126 +316,111 @@ class FluxGenerator:
             recon = rearrange(recon[0], "c h w -> h w c")
             recon = Image.fromarray((127.5 * (recon + 1.0)).cpu().byte().numpy())
 
-        return edited, inverted, recon, opts.seed
+        return edited, str(opts.seed), self.pulid_model.debug_img_list
+
+# <p style="font-size: 1rem; margin-bottom: 1.5rem;">Paper: <a href='https://arxiv.org/abs/2404.16022' target='_blank'>PuLID: Pure and Lightning ID Customization via Contrastive Alignment</a> | Codes: <a href='https://github.com/ToTheBeginning/PuLID' target='_blank'>GitHub</a></p>
+_HEADER_ = '''
+<div style="text-align: center; max-width: 650px; margin: 0 auto;">
+    <h1 style="font-size: 2.5rem; font-weight: 700; margin-bottom: 1rem; display: contents;">Tight Inversion for Portrait Editing with FLUX</h1>
+</div>
+
+❗️❗️❗️**Tips:**
+
+'''  # noqa E501
+
+_CITE_ = r"""
+"""  # noqa E501
 
 
-def main():
-    parser = argparse.ArgumentParser("Script to run PuLID+FLUX generation from YAML configs.")
-    parser.add_argument("--run_yaml", required=True, help="Path to YAML with environment/settings.")
-    parser.add_argument("--data_yaml", required=True, help="Path to YAML with prompt & ID image info.")
-    parser.add_argument("--output_path", default="results", help="Path to save the generated image.")
-    args = parser.parse_args()
+def create_demo(args, model_name: str, device: str = "cuda" if torch.cuda.is_available() else "cpu",
+                offload: bool = False, aggressive_offload: bool = False):
+    generator = FluxGenerator(model_name, device, offload, aggressive_offload, args)
 
-    # 1) Load environment parameters
-    with open(args.run_yaml, "r") as f:
-        run_cfg = yaml.safe_load(f)
+    with gr.Blocks() as demo:
+        gr.Markdown(_HEADER_)
 
-    # 2) Load job parameters
-    with open(args.data_yaml, "r") as f:
-        data_cfg = yaml.safe_load(f)
+        with gr.Row():
+            with gr.Column():
+                prompt = gr.Textbox(label="Prompt", value="portrait, color, cinematic")
+                id_image = gr.Image(label="ID Image")
+                id_weight = gr.Slider(0.0, 1.0, 0.4, step=0.05, label="id weight")
 
-    # Unpack environment config
-    version = run_cfg.get("version", "v0.9.1")
-    model_name = run_cfg.get("model_name", "flux-dev")
-    device = run_cfg.get("device", "cuda")
-    offload = run_cfg.get("offload", False)
-    aggressive_offload = run_cfg.get("aggressive_offload", False)
-    fp8 = run_cfg.get("fp8", False)
-    onnx_provider = run_cfg.get("onnx_provider", "gpu")
-    pretrained_model = run_cfg.get("pretrained_model", None)
-    t5_max_length = run_cfg.get("t5_max_length", 128)
+                width = gr.Slider(256, 1536, 1024, step=16, label="Width")
+                height = gr.Slider(256, 1536, 1024, step=16, label="Height")
+                num_steps = gr.Slider(1, 28, 28, step=1, label="Number of steps")
+                start_step = gr.Slider(0, 10, 0, step=1, label="timestep to start inserting ID")
+                guidance = gr.Slider(1.0, 10.0, 4.0, step=0.1, label="Guidance")
+                seed = gr.Textbox(-1, label="Seed (-1 for random)")
+                max_sequence_length = gr.Slider(128, 512, 128, step=128,
+                                                label="max_sequence_length for prompt (T5), small will be faster")
 
-    num_steps = run_cfg.get("num_steps", 20)
-    guidance = run_cfg.get("guidance", 4.0)
-    start_step = run_cfg.get("start_step", 0)
-    id_weight = run_cfg.get("id_weight", 1.0)
-    height = run_cfg.get("height", 512)
-    width = run_cfg.get("width", 512)
-    true_cfg = run_cfg.get("true_cfg", 1.0)
-    timestep_to_start_cfg = run_cfg.get("timestep_to_start_cfg", 1)
-    seed = run_cfg.get("seed", -1)
-    neg_prompt = run_cfg.get("neg_prompt", "")
-    gamma = run_cfg.get("gamma", 0.5)
-    eta = run_cfg.get("eta", 0.9)
-    s = run_cfg.get("s", 0)
-    tau = run_cfg.get("tau", 25)
-    use_ipa = run_cfg.get("use_ipa", True)
-    perform_inversion = run_cfg.get("perform_inversion", True)
-    save_inversion = run_cfg.get("save_inversion", False)
-    perform_reconstruction = run_cfg.get("perform_reconstruction", True)
-    perform_editing = run_cfg.get("perform_editing", True)
+                with gr.Accordion("Advanced Options (True CFG, true_cfg_scale=1 means use fake CFG, >1 means use true CFG", open=False):    # noqa E501
+                    neg_prompt = gr.Textbox(
+                        label="Negative Prompt",
+                        value="")
+                    true_cfg = gr.Slider(1.0, 10.0, 3.5, step=0.1, label="true CFG scale")
+                    timestep_to_start_cfg = gr.Slider(0, 20, 1, step=1, label="timestep to start cfg", visible=args.dev)
 
-    # Unpack job config
-    prompt = data_cfg["prompt"]
-    id_image_path = data_cfg.get("id_image", None)
-    image_path = id_image_path
+                generate_btn = gr.Button("Generate")
 
-    output_path = Path(args.output_path)
-    output_path.mkdir(parents=True, exist_ok=True)
-    # Save config
-    with open(output_path / "data_config.yaml", "w") as f:
-        yaml.dump(data_cfg, f)
-        print(f"Data config saved to: {output_path / 'data_config.yaml'}")
-    with open(output_path / "run_config.yaml", "w") as f:
-        yaml.dump(run_cfg, f)
-        print(f"Run config saved to: {output_path / 'run_config.yaml'}")
-    # Save original image
-    if image_path is not None:
-        img = Image.open(image_path)
-        img.save(output_path / "original.jpg")
-        print(f"Original image saved to: {output_path / 'original.jpg'}")
+            with gr.Column():
+                output_image = gr.Image(label="Generated Image")
+                seed_output = gr.Textbox(label="Used Seed")
+                intermediate_output = gr.Gallery(label='Output', elem_id="gallery", visible=args.dev)
+                gr.Markdown(_CITE_)
 
-    # 3) Create generator
-    generator = FluxGenerator(
-        model_name=model_name,
-        device=device,
-        offload=offload,
-        aggressive_offload=aggressive_offload,
-        fp8=fp8,
-        onnx_provider=onnx_provider,
-        pulid_pretrained_path=pretrained_model,
-        pulid_version=version,
-    )
+        with gr.Row(), gr.Column():
+                gr.Markdown("## Examples")
+                example_inps = [
+                    [
+                        'a portrait of an alien',
+                        'example_inputs/unsplash/alexander-jawfox-dNVjtsFA0p4-unsplash.jpg',
+                        0, 4.0, 42, 3.5
+                    ],
+                    [
+                        'a portrait of a clown',
+                        'example_inputs/unsplash/lhon-karwan-11tbHtK5STE-unsplash.jpg',
+                        0, 4.0, 42, 3.5
+                    ],
+                    [
+                        'a portrait of a wizard',
+                        'example_inputs/unsplash/arad-adiban-r--05n7pQ3g-unsplash.jpg',
+                        0, 4.0, 42, 3.5
+                    ],
+                ]
+                gr.Examples(examples=example_inps, inputs=[prompt, id_image, start_step, guidance, seed, true_cfg])
 
-    # 4) Generate image
-    generated_img, inverted, recon, used_seed = generator.generate_image(
-        prompt=prompt,
-        id_image_path=id_image_path if use_ipa else None,
-        width=width,
-        height=height,
-        num_steps=num_steps,
-        start_step=start_step,
-        guidance=guidance,
-        seed=seed,
-        id_weight=id_weight,
-        neg_prompt=neg_prompt,
-        true_cfg=true_cfg,
-        timestep_to_start_cfg=timestep_to_start_cfg,
-        max_sequence_length=t5_max_length,
-        image_path=image_path,
-        gamma=gamma,
-        eta=eta,
-        s=s,
-        tau=tau,
-        perform_inversion=perform_inversion,
-        perform_reconstruction=perform_reconstruction,
-        perform_editing=perform_editing,
-    )
+        generate_btn.click(
+            fn=generator.generate_image,
+            inputs=[prompt, id_image, width, height, num_steps, start_step, guidance, seed, id_weight, neg_prompt,
+                    true_cfg, timestep_to_start_cfg, max_sequence_length],
+            outputs=[output_image, seed_output, intermediate_output],
+        )
 
-    # 5) Save output
-    prompt = prompt.replace(" ", "_")
-    if generated_img is not None:
-        generated_img.save(output_path / f'{prompt}.jpg')
-        print(f"Generated image saved to: {output_path / f'{prompt}.jpg'}")
-    if inverted is not None and save_inversion:
-        inverted.save(output_path / "inverted.jpg")
-        print(f"Inverted image saved to: {output_path / 'inverted.jpg'}")
-    if recon is not None:
-        recon.save(output_path / "reconstruction.jpg")
-        print(f"Reconstructed image saved to: {output_path / 'reconstruction.jpg'}")
-    print(f"Used seed: {used_seed}")
-    find_and_plot_images(output_path, output_path / "results.jpg", recursive=False)
+    return demo
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="PuLID for FLUX.1-dev")
+    parser.add_argument('--version', type=str, default='v0.9.1', help='version of the model', choices=['v0.9.0', 'v0.9.1'])
+    parser.add_argument("--name", type=str, default="flux-dev", choices=list('flux-dev'),
+                        help="currently only support flux-dev")
+    parser.add_argument("--device", type=str, default="cuda", help="Device to use")
+    parser.add_argument("--offload", action="store_true", help="Offload model to CPU when not in use")
+    parser.add_argument("--aggressive_offload", action="store_true", help="Offload model more aggressively to CPU when not in use, for 24G GPUs")
+    parser.add_argument("--fp8", action="store_true", help="use flux-dev-fp8 model")
+    parser.add_argument("--onnx_provider", type=str, default="gpu", choices=["gpu", "cpu"],
+                        help="set onnx_provider to cpu (default gpu) can help reduce RAM usage, and when combined with"
+                             "fp8 option, the peak RAM is under 15GB")
+    parser.add_argument("--port", type=int, default=8080, help="Port to use")
+    parser.add_argument("--dev", action='store_true', help="Development mode")
+    parser.add_argument("--pretrained_model", type=str, help='for development')
+    args = parser.parse_args()
+
+    if args.aggressive_offload:
+        args.offload = True
+
+    demo = create_demo(args, args.name, args.device, args.offload, args.aggressive_offload)
+    demo.launch(server_name='0.0.0.0', server_port=args.port)
