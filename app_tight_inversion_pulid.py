@@ -378,20 +378,30 @@ def create_demo(args, model_name: str, device: str = "cuda" if torch.cuda.is_ava
         with gr.Row(), gr.Column():
                 gr.Markdown("## Examples")
                 example_inps = [
-                    [
-                        'a portrait of an alien',
-                        'example_inputs/unsplash/alexander-jawfox-dNVjtsFA0p4-unsplash.jpg',
-                        0.3, 4.0, 42, 3.5
-                    ],
+                    # [
+                    #     'a portrait of an alien',
+                    #     'example_inputs/unsplash/alexander-jawfox-dNVjtsFA0p4-unsplash.jpg',
+                    #     0.3, 4.0, 42, 3.5
+                    # ],
                     [
                         'a portrait of a clown',
                         'example_inputs/unsplash/lhon-karwan-11tbHtK5STE-unsplash.jpg',
                         0.5, 3.5, 42, 3.5
                     ],
                     [
+                        'a portrait of a zombie',
+                        'example_inputs/unsplash/baruk-granda-cfLL_jHQ-Iw-unsplash.jpg',
+                        0.4, 3.5, 42, 3.5
+                    ],
+                    [
                         'a portrait of a wizard',
                         'example_inputs/unsplash/arad-adiban-r--05n7pQ3g-unsplash.jpg',
                         0.2, 3.5, 42, 3.5
+                    ],
+                    [
+                        'a portrait of a demon',
+                        'example_inputs/unsplash/dj-tears-plk-jRtj04oq33E-unsplash.jpg',
+                        0.4, 3.5, 42, 3.5
                     ],
                     [
                         'a portrait of an elf',
@@ -402,6 +412,11 @@ def create_demo(args, model_name: str, device: str = "cuda" if torch.cuda.is_ava
                         'a portrait of a pirate',
                         'example_inputs/unsplash/mina-rad-AEVUFpDGxZM-unsplash.jpg',
                         0.3, 3.5, 42, 3.5
+                    ],
+                    [
+                        'a portrait of a superhero',
+                        'example_inputs/unsplash/gus-tu-njana-Mf4MN7MZqcE-unsplash.jpg',
+                        0.6, 3.5, 42, 3.5
                     ],
                 ]
                 gr.Examples(examples=example_inps, inputs=[prompt, id_image, id_weight, guidance, seed, true_cfg])
