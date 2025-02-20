@@ -38,9 +38,9 @@
             "console": "integratedTerminal",
             "args": [
                 "--run_yaml",
-                "configs/run_configs/rf_pulid_0.7.yaml",
+                "configs/run_configs/portraits/rf_pulid_0.2.yaml",
                 "--data_yaml",
-                "configs/data_configs/portraits/nir.yaml",
+                "configs/data_configs/unsplash_yamls/alexander-jawfox-dNVjtsFA0p4-unsplash.yaml",
                 "--output_path",
                 "results/debug/pulid"
             ]

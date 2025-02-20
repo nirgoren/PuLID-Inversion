@@ -58,7 +58,8 @@ class FluxGenerator:
         Opposite of decode: Takes a PIL image and encodes it into latents (x).
         """
         t0 = time.perf_counter()
-        img = Image.fromarray(img)
+
+        # Resize if necessary, or use opts.height / opts.width if you want a fixed size:
         img = img.resize((opts.width, opts.height), resample=Image.LANCZOS)
 
         # Convert image to torch.Tensor and scale to [-1, 1]
@@ -76,7 +77,8 @@ class FluxGenerator:
 
         # 2) Encode with autocast
         with torch.autocast(device_type=self.device.type, dtype=torch.bfloat16):
-            x = self.ae.encode_no_sampling(x)
+            x = self.ae.encode(x)
+
 
         # 3) Offload if needed
         if self.offload:
@@ -183,6 +185,7 @@ class FluxGenerator:
         id_embeddings = None
         uncond_id_embeddings = None
         if id_image is not None:
+            id_image = np.array(id_image)
             id_image = resize_numpy_image_long(id_image, 1024)
             id_embeddings, uncond_id_embeddings = self.pulid_model.get_id_embedding(id_image, cal_uncond=use_true_cfg)
         else:
@@ -345,17 +348,13 @@ def create_demo(args, model_name: str, device: str = "cuda" if torch.cuda.is_ava
         with gr.Row():
             with gr.Column():
                 prompt = gr.Textbox(label="Prompt", value="portrait, color, cinematic")
-                id_image = gr.Image(label="ID Image")
+                id_image = gr.Image(label="ID Image", type="pil")
                 id_weight = gr.Slider(0.0, 1.0, 0.4, step=0.05, label="id weight")
 
-                width = gr.Slider(256, 1536, 1024, step=16, label="Width")
-                height = gr.Slider(256, 1536, 1024, step=16, label="Height")
+                width = gr.Slider(256, 1536, 1024, step=16, label="Width", visible=args.dev)
+                height = gr.Slider(256, 1536, 1024, step=16, label="Height", visible=args.dev)
                 num_steps = gr.Slider(1, 28, 28, step=1, label="Number of steps")
-                start_step = gr.Slider(0, 10, 0, step=1, label="timestep to start inserting ID")
-                guidance = gr.Slider(1.0, 10.0, 4.0, step=0.1, label="Guidance")
-                seed = gr.Textbox(-1, label="Seed (-1 for random)")
-                max_sequence_length = gr.Slider(128, 512, 128, step=128,
-                                                label="max_sequence_length for prompt (T5), small will be faster")
+                guidance = gr.Slider(1.0, 10.0, 3.5, step=0.1, label="Guidance")
 
                 with gr.Accordion("Advanced Options (True CFG, true_cfg_scale=1 means use fake CFG, >1 means use true CFG", open=False):    # noqa E501
                     neg_prompt = gr.Textbox(
@@ -363,6 +362,10 @@ def create_demo(args, model_name: str, device: str = "cuda" if torch.cuda.is_ava
                         value="")
                     true_cfg = gr.Slider(1.0, 10.0, 3.5, step=0.1, label="true CFG scale")
                     timestep_to_start_cfg = gr.Slider(0, 20, 1, step=1, label="timestep to start cfg", visible=args.dev)
+                    start_step = gr.Slider(0, 10, 0, step=1, label="timestep to start inserting ID")
+                    seed = gr.Textbox(-1, label="Seed (-1 for random)")
+                    max_sequence_length = gr.Slider(128, 512, 128, step=128,
+                                                    label="max_sequence_length for prompt (T5), small will be faster")
 
                 generate_btn = gr.Button("Generate")
 
@@ -378,20 +381,30 @@ def create_demo(args, model_name: str, device: str = "cuda" if torch.cuda.is_ava
                     [
                         'a portrait of an alien',
                         'example_inputs/unsplash/alexander-jawfox-dNVjtsFA0p4-unsplash.jpg',
-                        0, 4.0, 42, 3.5
+                        0.3, 4.0, 42, 3.5
                     ],
                     [
                         'a portrait of a clown',
                         'example_inputs/unsplash/lhon-karwan-11tbHtK5STE-unsplash.jpg',
-                        0, 4.0, 42, 3.5
+                        0.5, 3.5, 42, 3.5
                     ],
                     [
                         'a portrait of a wizard',
                         'example_inputs/unsplash/arad-adiban-r--05n7pQ3g-unsplash.jpg',
-                        0, 4.0, 42, 3.5
+                        0.2, 3.5, 42, 3.5
+                    ],
+                    [
+                        'a portrait of an elf',
+                        'example_inputs/unsplash/masoud-razeghi--qsrZhXPius-unsplash.jpg',
+                        0.4, 3.5, 42, 3.5
+                    ],
+                    [
+                        'a portrait of a pirate',
+                        'example_inputs/unsplash/mina-rad-AEVUFpDGxZM-unsplash.jpg',
+                        0.3, 3.5, 42, 3.5
                     ],
                 ]
-                gr.Examples(examples=example_inps, inputs=[prompt, id_image, start_step, guidance, seed, true_cfg])
+                gr.Examples(examples=example_inps, inputs=[prompt, id_image, id_weight, guidance, seed, true_cfg])
 
         generate_btn.click(
             fn=generator.generate_image,
