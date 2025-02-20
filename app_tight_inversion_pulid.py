@@ -132,6 +132,8 @@ class FluxGenerator:
             seed=seed,
         )
 
+        torch.manual_seed(opts.seed)
+
         if opts.seed is None:
             opts.seed = torch.Generator(device="cpu").seed()
 
@@ -139,6 +141,7 @@ class FluxGenerator:
         t0 = time.perf_counter()
 
         use_true_cfg = abs(true_cfg - 1.0) > 1e-6
+
 
         # 1) Prepare input noise
         noise = get_noise(
