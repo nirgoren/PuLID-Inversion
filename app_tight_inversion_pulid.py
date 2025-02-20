@@ -331,9 +331,9 @@ _HEADER_ = '''
 </div>
 
 ❗️❗️❗️**Tips:**
-
+Provide a portrait image and an edit prompt. You can try the examples below or upload your own image.
+Adjust the id weight to control the faithfulness of the generated image to the input image.
 '''  # noqa E501
-
 _CITE_ = r"""
 """  # noqa E501
 
@@ -406,7 +406,7 @@ def create_demo(args, model_name: str, device: str = "cuda" if torch.cuda.is_ava
                     [
                         'a portrait of an elf',
                         'example_inputs/unsplash/masoud-razeghi--qsrZhXPius-unsplash.jpg',
-                        0.4, 3.5, 42, 3.5
+                        0.5, 3.5, 42, 3.5
                     ],
                     [
                         'a portrait of a pirate',
