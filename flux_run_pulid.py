@@ -24,7 +24,7 @@ from flux.util import (
     load_t5,
 )
 from pulid.pipeline_flux import PuLIDPipeline
-from pulid.utils import resize_numpy_image_long
+from pulid.utils import resize_numpy_image_long, seed_everything
 
 
 def get_models(model_name: str, device: torch.device, offload: bool, fp8: bool,
@@ -175,7 +175,7 @@ class FluxGenerator:
             seed=seed,
         )
 
-        torch.manual_seed(opts.seed)
+        seed_everything(opts.seed)
 
         if opts.seed is None:
             opts.seed = torch.Generator(device="cpu").seed()
@@ -231,6 +231,7 @@ class FluxGenerator:
             id_embeddings, uncond_id_embeddings = self.pulid_model.get_id_embedding(
                 id_image, cal_uncond=use_true_cfg
             )
+            torch.save(id_embeddings, "id_embeddings.pth")
 
         # Offload ID pipeline, load main FLUX model to GPU
         if self.offload:
