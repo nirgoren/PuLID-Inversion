@@ -123,15 +123,19 @@ def load_flow_model(name: str, device: str = "cuda", hf_download: bool = True):
     ):
         ckpt_path = hf_hub_download(configs[name].repo_id, configs[name].repo_flow, local_dir='models')
 
-    with torch.device(device):
-        model = Flux(configs[name].params).to(torch.bfloat16)
+# Initialize the model on the 'meta' device, which doesn't allocate real memory
+    with torch.device('meta'):
+        model = Flux(configs[name].params)
+    model = model.to_empty(device=device)
 
     if ckpt_path is not None:
         print("Loading checkpoint")
-        # load_sft doesn't support torch.device
+        # Load the state dictionary directly to the desired device
         sd = load_sft(ckpt_path, device=str(device))
+        # Load the state dictionary into the model
         missing, unexpected = model.load_state_dict(sd, strict=False)
         print_load_warning(missing, unexpected)
+    model.to(torch.bfloat16)
     return model
 
 # from XLabs-AI https://github.com/XLabs-AI/x-flux/blob/1f8ef54972105ad9062be69fe6b7f841bce02a08/src/flux/util.py#L330

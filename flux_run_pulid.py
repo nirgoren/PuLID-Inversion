@@ -119,6 +119,7 @@ class FluxGenerator:
         with torch.autocast(device_type=self.device.type, dtype=torch.bfloat16):
             # x = self.ae.encode_no_sampling(x)
             x = self.ae.encode(x)
+        x = x.to(torch.bfloat16)
 
         # 3) Offload if needed
         if self.offload:
