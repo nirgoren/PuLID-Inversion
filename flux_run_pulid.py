@@ -8,11 +8,7 @@ from einops import rearrange, repeat
 from PIL import Image
 import os
 
-# -------------------------------------------------------------------
-# The following imports must match your environment or local modules:
-# If you have local modules named similarly to the original snippet,
-# adjust as appropriate:
-# -------------------------------------------------------------------
+# Existing imports...
 from flux.sampling import denoise, get_noise, get_schedule, prepare, unpack, rf_denoise, rf_inversion
 from flux.image_utils import find_and_plot_images
 from flux.util import (
@@ -80,7 +76,6 @@ class FluxGenerator:
         self.clip_model = clip_model
         self.pulid_model = pulid_model
 
-        # Move some parts to GPU for face/ID detection if offload is enabled
         if offload:
             self.pulid_model.face_helper.face_det.mean_tensor = \
                 self.pulid_model.face_helper.face_det.mean_tensor.to(torch.device("cuda"))
@@ -90,45 +85,41 @@ class FluxGenerator:
 
         self.pulid_model.load_pretrain(pulid_pretrained_path, version=pulid_version)
 
-    # function to encode an image into latents
+        # Set up machine-specific save directory
+        self.machine_id = os.environ.get("MACHINE_ID", "unknown")
+        self.save_dir = Path(f"latents/{self.machine_id}")
+        self.save_dir.mkdir(parents=True, exist_ok=True)
+
     def encode_image_to_latents(self, img_path, opts):
-        """
-        Opposite of decode: Takes a PIL image and encodes it into latents (x).
-        """
         t0 = time.perf_counter()
 
-        # 1) Load and preprocess PIL image
         img = Image.open(img_path).convert("RGB")
-        # Resize if necessary, or use opts.height / opts.width if you want a fixed size:
         img = img.resize((opts.width, opts.height), resample=Image.LANCZOS)
 
-        # Convert image to torch.Tensor and scale to [-1, 1]
-        # Image is in [0, 255] → scale to [0,1] → then map to [-1,1].
         x = np.array(img).astype(np.float32)
-        x = torch.from_numpy(x)  # shape: (H, W, C)
-        x = (x / 127.5) - 1.0    # now in [-1, 1]
-        x = rearrange(x, "h w c -> 1 c h w")  # shape: (1, C, H, W)
+        x = torch.from_numpy(x)
+        x = (x / 127.5) - 1.0
+        x = rearrange(x, "h w c -> 1 c h w")
+        torch.save(x, self.save_dir / "image_tensor_raw.pth")
 
-        # Move encoder to device if you are offloading
         if self.offload:
             self.ae.encoder.to(self.device)
 
         x = x.to(self.device, dtype=torch.bfloat16)
+        torch.save(x, self.save_dir / "image_tensor_device.pth")
 
-        # 2) Encode with autocast
         with torch.autocast(device_type=self.device.type, dtype=torch.bfloat16):
-            # x = self.ae.encode_no_sampling(x)
-            x = self.ae.encode(x)
-        x = x.to(torch.bfloat16)
+            x_encoded = self.ae.encode(x)
+        torch.save(x_encoded, self.save_dir / "latents_encoded.pth")
 
-        # 3) Offload if needed
+        x = x_encoded.to(torch.bfloat16)
+
         if self.offload:
             self.ae.encoder.cpu()
             torch.cuda.empty_cache()
 
         t1 = time.perf_counter()
         print(f"Encoded in {t1 - t0:.2f} seconds.")
-
         return x
 
     @torch.inference_mode()
@@ -157,12 +148,8 @@ class FluxGenerator:
         perform_editing: bool = True,
         inversion_true_cfg: float = 1.0,
     ):
-        """
-        Core function that performs the image generation.
-        """
         self.t5.max_length = max_sequence_length
 
-        # If seed == -1, random
         if seed == -1:
             seed = None
 
@@ -185,7 +172,6 @@ class FluxGenerator:
 
         use_true_cfg = abs(true_cfg - 1.0) > 1e-6
 
-        # 1) Prepare input noise
         noise = get_noise(
             num_samples=1,
             height=opts.height,
@@ -194,46 +180,61 @@ class FluxGenerator:
             dtype=torch.bfloat16,
             seed=opts.seed,
         )
+        torch.save(noise, self.save_dir / "noise_initial.pth")
+
         bs, c, h, w = noise.shape
         noise = rearrange(noise, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=2, pw=2)
         if noise.shape[0] == 1 and bs > 1:
             noise = repeat(noise, "1 ... -> bs ...", bs=bs)
-        # encode
-        x = self.encode_image_to_latents(image_path, opts)
-        
-        timesteps = get_schedule(opts.num_steps, x.shape[-1] * x.shape[-2] // 4, shift=False)
+        torch.save(noise, self.save_dir / "noise_rearranged.pth")
 
-        # 2) Prepare text embeddings
+        x = self.encode_image_to_latents(image_path, opts) if image_path else None
+        if x is not None:
+            torch.save(x, self.save_dir / "latents_input.pth")
+
+        timesteps = get_schedule(opts.num_steps, x.shape[-1] * x.shape[-2] // 4 if x is not None else opts.height * opts.width // 4, shift=False)
+        torch.save(timesteps, self.save_dir / "timesteps.pth")
+
         if self.offload:
             self.t5 = self.t5.to(self.device)
             self.clip_model = self.clip_model.to(self.device)
 
         inp = prepare(t5=self.t5, clip=self.clip_model, img=x, prompt=opts.prompt)
+        torch.save(inp["txt"], self.save_dir / "text_emb_prompt.pth")
+        torch.save(inp["txt_ids"], self.save_dir / "text_ids_prompt.pth")
+        torch.save(inp["vec"], self.save_dir / "text_vec_prompt.pth")
+
         inp_inversion = prepare(t5=self.t5, clip=self.clip_model, img=x, prompt="")
+        torch.save(inp_inversion["txt"], self.save_dir / "text_emb_inversion.pth")
+
         inp_neg = None
         if use_true_cfg:
             inp_neg = prepare(t5=self.t5, clip=self.clip_model, img=x, prompt=neg_prompt)
+            torch.save(inp_neg["txt"], self.save_dir / "text_emb_neg.pth")
+            torch.save(inp_neg["txt_ids"], self.save_dir / "text_ids_neg.pth")
+            torch.save(inp_neg["vec"], self.save_dir / "text_vec_neg.pth")
 
-        # Offload text encoders, load ID detection to GPU
         if self.offload:
             self.t5 = self.t5.cpu()
             self.clip_model = self.clip_model.cpu()
             torch.cuda.empty_cache()
             self.pulid_model.components_to_device(torch.device("cuda"))
 
-        # 3) ID Embeddings (optional)
         id_embeddings = None
         uncond_id_embeddings = None
         if id_image_path is not None and os.path.exists(id_image_path):
             id_image = Image.open(id_image_path).convert("RGB")
             id_image = np.array(id_image)
             id_image = resize_numpy_image_long(id_image, 1024)
+            torch.save(torch.from_numpy(id_image), self.save_dir / "id_image_numpy.pth")
+
             id_embeddings, uncond_id_embeddings = self.pulid_model.get_id_embedding(
                 id_image, cal_uncond=use_true_cfg
             )
-            torch.save(id_embeddings, "id_embeddings.pth")
+            torch.save(id_embeddings, self.save_dir / "id_embeddings.pth")
+            if uncond_id_embeddings is not None:
+                torch.save(uncond_id_embeddings, self.save_dir / "uncond_id_embeddings.pth")
 
-        # Offload ID pipeline, load main FLUX model to GPU
         if self.offload:
             self.pulid_model.components_to_device(torch.device("cpu"))
             torch.cuda.empty_cache()
@@ -243,7 +244,9 @@ class FluxGenerator:
             else:
                 self.model = self.model.to(self.device)
 
-        y_0 = inp["img"].clone().detach()
+        y_0 = inp["img"].clone().detach() if x is not None else None
+        if y_0 is not None:
+            torch.save(y_0, self.save_dir / "y_0_initial.pth")
 
         inverted = None
         if perform_inversion:
@@ -265,12 +268,14 @@ class FluxGenerator:
                 y_1=noise,
                 gamma=gamma
             )
+            torch.save(inverted, self.save_dir / "inverted_latents.pth")
 
             img = inverted
         else:
             img = noise
         inp["img"] = img
         inp_inversion["img"] = img
+        torch.save(img, self.save_dir / "img_initial.pth")
 
         recon = None
         if perform_reconstruction:
@@ -294,6 +299,7 @@ class FluxGenerator:
                 s=s,
                 tau=tau,
             )
+            torch.save(recon, self.save_dir / "reconstructed_latents.pth")
 
         edited = None
         if perform_editing:
@@ -317,28 +323,42 @@ class FluxGenerator:
                 s=s,
                 tau=tau,
             )
+            torch.save(edited, self.save_dir / "edited_latents.pth")
 
-        # Offload flux model, load auto-decoder
         if self.offload:
             self.model.cpu()
             torch.cuda.empty_cache()
-            self.ae.decoder.to(x.device)
+            self.ae.decoder.to(x.device if x is not None else self.device)
 
-        # 5) Decode latents
         if edited is not None:
             edited = unpack(edited.float(), opts.height, opts.width)
             with torch.autocast(device_type=self.device.type, dtype=torch.bfloat16):
-                edited = self.ae.decode(edited)
+                edited_decoded = self.ae.decode(edited)
+            torch.save(edited_decoded, self.save_dir / "edited_decoded.pth")
+
+            edited = edited_decoded.clamp(-1, 1)
+            edited = rearrange(edited[0], "c h w -> h w c")
+            edited = Image.fromarray((127.5 * (edited + 1.0)).cpu().byte().numpy())
 
         if inverted is not None:
             inverted = unpack(inverted.float(), opts.height, opts.width)
             with torch.autocast(device_type=self.device.type, dtype=torch.bfloat16):
-                inverted = self.ae.decode(inverted)
-        
+                inverted_decoded = self.ae.decode(inverted)
+            torch.save(inverted_decoded, self.save_dir / "inverted_decoded.pth")
+
+            inverted = inverted_decoded.clamp(-1, 1)
+            inverted = rearrange(inverted[0], "c h w -> h w c")
+            inverted = Image.fromarray((127.5 * (inverted + 1.0)).cpu().byte().numpy())
+
         if recon is not None:
             recon = unpack(recon.float(), opts.height, opts.width)
             with torch.autocast(device_type=self.device.type, dtype=torch.bfloat16):
-                recon = self.ae.decode(recon)
+                recon_decoded = self.ae.decode(recon)
+            torch.save(recon_decoded, self.save_dir / "reconstructed_decoded.pth")
+
+            recon = recon_decoded.clamp(-1, 1)
+            recon = rearrange(recon[0], "c h w -> h w c")
+            recon = Image.fromarray((127.5 * (recon + 1.0)).cpu().byte().numpy())
 
         if self.offload:
             self.ae.decoder.cpu()
@@ -346,23 +366,6 @@ class FluxGenerator:
 
         t1 = time.perf_counter()
         print(f"Done in {t1 - t0:.2f} seconds.")
-
-        # Convert to PIL
-        if edited is not None:
-            edited = edited.clamp(-1, 1)
-            edited = rearrange(edited[0], "c h w -> h w c")
-            edited = Image.fromarray((127.5 * (edited + 1.0)).cpu().byte().numpy())
-
-        if inverted is not None:
-            inverted = inverted.clamp(-1, 1)
-            inverted = rearrange(inverted[0], "c h w -> h w c")
-            inverted = Image.fromarray((127.5 * (inverted + 1.0)).cpu().byte().numpy())
-        
-        if recon is not None:
-            recon = recon.clamp(-1, 1)
-            recon = rearrange(recon[0], "c h w -> h w c")
-            recon = Image.fromarray((127.5 * (recon + 1.0)).cpu().byte().numpy())
-
         return edited, inverted, recon, opts.seed
 
 
