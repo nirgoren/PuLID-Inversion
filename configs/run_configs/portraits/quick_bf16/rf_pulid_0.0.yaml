@@ -21,6 +21,7 @@ seed: 42
 neg_prompt: ""
 use_ipa: false
 gamma: 0.5
-eta: 0.8
+eta: 0.6
 s: 0
 tau: 2
+perform_reconstruction: false

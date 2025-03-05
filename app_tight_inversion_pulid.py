@@ -370,7 +370,7 @@ def create_demo(args, model_name: str, device: str = "cuda" if torch.cuda.is_ava
                                                     label="max_sequence_length for prompt (T5), small will be faster")
                     gr.Markdown("### RF Inversion Options")
                     gamma = gr.Slider(0.0, 1.0, 0.5, step=0.1, label="gamma")
-                    eta = gr.Slider(0.0, 1.0, 0.8, step=0.1, label="eta")
+                    eta = gr.Slider(0.0, 1.0, 0.7, step=0.1, label="eta")
                     s = gr.Slider(0.0, 1.0, 0.0, step=0.1, label="s")
                     tau = gr.Slider(0, 20, 2, step=1, label="tau")
 
@@ -385,20 +385,20 @@ def create_demo(args, model_name: str, device: str = "cuda" if torch.cuda.is_ava
         with gr.Row(), gr.Column():
                 gr.Markdown("## Examples")
                 example_inps = [
-                    [
-                        'a portrait of a vampire',
-                        'example_inputs/unsplash/krisna-putra-pratama-lKF-MdtuIss-unsplash.jpg',
-                        0.4, 3.5, 42, 3.5
-                    ],
+                    # [
+                    #     'a portrait of a vampire',
+                    #     'example_inputs/unsplash/krisna-putra-pratama-lKF-MdtuIss-unsplash.jpg',
+                    #     0.4, 3.5, 42, 3.5
+                    # ],
                     [
                         'a portrait of a zombie',
                         'example_inputs/unsplash/baruk-granda-cfLL_jHQ-Iw-unsplash.jpg',
-                        0.5, 3.5, 42, 5.0
+                        0.4, 3.5, 42, 5.0
                     ],
                     [
                         'a portrait of an elf',
                         'example_inputs/unsplash/rahmat-alizada-7PwFKOgyoKo-unsplash.jpg',
-                        0.6, 3.5, 42, 3.5
+                        0.5, 3.5, 42, 5.0
                     ],
                     [
                         'a portrait of a clown',
@@ -408,7 +408,7 @@ def create_demo(args, model_name: str, device: str = "cuda" if torch.cuda.is_ava
                     [
                         'a portrait of an elf',
                         'example_inputs/unsplash/masoud-razeghi--qsrZhXPius-unsplash.jpg',
-                        0.5, 3.5, 42, 3.5
+                        0.5, 3.5, 42, 5.0
                     ],
                     # [
                     #     'a portrait of a pirate',
